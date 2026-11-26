@@ -6,15 +6,28 @@ export function layout(
   title: string,
   content: string,
   config: Record<string, string> = {},
-  options: { categories?: Category[]; currentCategory?: string; description?: string; canonical?: string } = {}
+  options: {
+    categories?: Category[];
+    currentCategory?: string;
+    description?: string;
+    canonical?: string;
+    ogType?: string;
+    ogImage?: string;
+    robots?: string;
+    jsonLd?: string;
+    origin?: string;
+  } = {}
 ): string {
   const blogTitle = config.blog_title || "FishBlog";
   const blogDesc = config.blog_description || "";
   const pageDesc = options.description || blogDesc;
   const { categories, currentCategory } = options;
-  const canonical = options.canonical;
+  const origin = (options.origin || "").replace(/\/$/, "");
+  const canonical = options.canonical?.trim() || "";
+  const fullTitle = title === blogTitle ? blogTitle : `${title} - ${blogTitle}`;
+  const link = (path: string) => `${origin}${path}`;
 
-  const sidebar = categories ? buildSidebar(categories, currentCategory) : "";
+  const sidebar = categories ? buildSidebar(categories, currentCategory, link) : "";
   const hasSidebar = !!categories;
 
   return `<!DOCTYPE html>
@@ -22,14 +35,21 @@ export function layout(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escapeHtml(title)} - ${escapeHtml(blogTitle)}</title>
+  <title>${escapeHtml(fullTitle)}</title>
   <meta name="description" content="${escapeHtml(pageDesc)}">
-  <link rel="canonical" href="${escapeHtml(canonical || "")}">
-  <link rel="alternate" type="application/rss+xml" title="RSS" href="/feed.xml">
+  ${canonical ? `<link rel="canonical" href="${escapeHtml(canonical)}">` : ""}
+  ${options.robots ? `<meta name="robots" content="${escapeHtml(options.robots)}">` : ""}
+  <link rel="alternate" type="application/rss+xml" title="RSS" href="${link("/feed.xml")}">
+  <meta property="og:type" content="${escapeHtml(options.ogType || "website")}">
   <meta property="og:site_name" content="${escapeHtml(blogTitle)}">
   <meta property="og:title" content="${escapeHtml(title)}">
   <meta property="og:description" content="${escapeHtml(pageDesc)}">
-  <link rel="icon" href="/favicon.ico">
+  ${canonical ? `<meta property="og:url" content="${escapeHtml(canonical)}">` : ""}
+  ${options.ogImage ? `<meta property="og:image" content="${escapeHtml(options.ogImage)}">` : ""}
+  <meta property="og:locale" content="zh_CN">
+  <meta name="twitter:card" content="${options.ogImage ? "summary_large_image" : "summary"}">
+  ${options.jsonLd ? `<script type="application/ld+json">${options.jsonLd}</script>` : ""}
+  <link rel="icon" href="${link("/favicon.ico")}">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -37,9 +57,9 @@ export function layout(
       --bg: #fafaf9; --fg: #1c1917; --muted: #78716c; --border: #e7e5e4;
       --accent: #ea580c; --accent-hover: #c2410c; --surface: #ffffff;
       --radius: 8px; --max-w: 960px;
-      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-      --font-serif: 'Noto Serif SC', 'Source Han Serif SC', Georgia, serif;
+      --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      --font-mono: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+      --font-serif: 'Songti SC', 'SimSun', Georgia, serif;
     }
 
     @media (prefers-color-scheme: dark) {
@@ -52,8 +72,8 @@ export function layout(
 
     header { border-bottom: 1px solid var(--border); padding: 1.5rem 0; }
     header .inner { max-width: var(--max-w); margin: 0 auto; padding: 0 1.5rem; display: flex; justify-content: space-between; align-items: center; }
-    header h1 { font-size: 1.25rem; font-weight: 700; }
-    header h1 a { color: var(--fg); }
+    header .brand { font-size: 1.25rem; font-weight: 700; }
+    header .brand a { color: var(--fg); }
     header nav { display: flex; gap: 1.5rem; font-size: .9rem; align-items: center; }
     header nav a { color: var(--muted); font-weight: 500; }
     header nav a:hover { color: var(--fg); }
@@ -138,7 +158,9 @@ export function layout(
     .archive-list li { padding: .4rem 0; display: flex; gap: 1rem; align-items: baseline; }
     .archive-list .date { color: var(--muted); font-size: .8rem; font-family: var(--font-mono); white-space: nowrap; }
 
-    .search-results-title { font-size: 1.2rem; margin-bottom: 1rem; }
+    .page-title { font-size: 1.6rem; font-weight: 700; line-height: 1.3; margin-bottom: .5rem; font-family: var(--font-serif); }
+    .page-lead { color: var(--muted); font-size: .95rem; margin-bottom: 1rem; }
+    .search-results-title { font-size: 1.2rem; margin-bottom: 1rem; font-weight: 700; }
     .search-results-title span { color: var(--accent); }
 
     .tag-list { display: inline-flex; gap: .4rem; flex-wrap: wrap; }
@@ -183,28 +205,26 @@ export function layout(
     .comment-form button:hover { background: var(--accent-hover); }
     .hp-field { position: absolute; left: -9999px; opacity: 0; height: 0; width: 0; }
   </style>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Serif+SC:wght@400;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 </head>
 <body>
   <header>
     <div class="inner">
-      <h1><a href="/">${escapeHtml(blogTitle)}</a></h1>
+      <div class="brand"><a href="${link("/")}">${escapeHtml(blogTitle)}</a></div>
       <nav>
-        <a href="/">首页</a>
-        <a href="/archive">归档</a>
+        <a href="${link("/")}">首页</a>
+        <a href="${link("/archive")}">归档</a>
         <div class="search-box">
-          <form action="/search" method="GET">
+          <form action="${link("/search")}" method="GET">
             <input type="text" name="q" placeholder="搜索文章..." aria-label="搜索">
           </form>
         </div>
       </nav>
     </div>
   </header>
-  <div class="content-wrap">
+  <main class="content-wrap">
     <div class="main-content">${content}</div>
     ${sidebar}
-  </div>
+  </main>
   <footer>${sanitizeContent(config.blog_footer || "Powered by FishBlog")}</footer>
   <script>
     var el = document.getElementById('ct-ts');
@@ -215,22 +235,21 @@ export function layout(
 </html>`;
 }
 
-function buildSidebar(categories: Category[], currentCategory?: string): string {
+function buildSidebar(categories: Category[], currentCategory: string | undefined, link: (path: string) => string): string {
   if (!categories.length) {
     return `<aside class="sidebar"><div class="sidebar-card"><h3>分类</h3><p style="font-size:.85rem;color:var(--muted)">暂无分类</p></div></aside>`;
   }
 
-  let items = `<li><a href="/" class="${!currentCategory ? "active" : ""}">全部</a></li>`;
+  let items = `<li><a href="${link("/")}" class="${!currentCategory ? "active" : ""}">全部</a></li>`;
 
   for (const cat of categories) {
     const isActive = currentCategory === String(cat.id);
-    const hasActiveChild = cat.children?.some((c) => currentCategory === String(c.id));
-    items += `<li><a href="/?cat=${cat.id}" class="${isActive ? "active" : ""}">${escapeHtml(cat.name)}<span class="cat-count">${cat.post_count || 0}</span></a>`;
+    items += `<li><a href="${link(`/?cat=${cat.id}`)}" class="${isActive ? "active" : ""}">${escapeHtml(cat.name)}<span class="cat-count">${cat.post_count || 0}</span></a>`;
     if (cat.children && cat.children.length > 0) {
       items += `<ul class="cat-list cat-sub">`;
       for (const child of cat.children) {
         const childActive = currentCategory === String(child.id);
-        items += `<li><a href="/?cat=${child.id}" class="${childActive ? "active" : ""}">${escapeHtml(child.name)}<span class="cat-count">${child.post_count || 0}</span></a></li>`;
+        items += `<li><a href="${link(`/?cat=${child.id}`)}" class="${childActive ? "active" : ""}">${escapeHtml(child.name)}<span class="cat-count">${child.post_count || 0}</span></a></li>`;
       }
       items += `</ul>`;
     }
