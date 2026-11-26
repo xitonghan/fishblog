@@ -1,5 +1,7 @@
 export type Env = {
   DB: D1Database;
+  IMAGES: KVNamespace;
+  PAGES: KVNamespace;
   BLOG_TITLE: string;
   BLOG_DESCRIPTION: string;
   ADMIN_USERNAME: string;
