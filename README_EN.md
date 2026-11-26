@@ -1,12 +1,23 @@
 # FishBlog 🐟
 
+<div align="center">
+
+# 🌐 [blog.987998.xyz](https://blog.987998.xyz/)
+
+**Xitong's Blog · Embedded hardware, electronics notes, and life reflections**
+
+[Open blog](https://blog.987998.xyz/) · [Admin](https://blog.987998.xyz/admin)
+
+</div>
+
 A lightweight blog built on Cloudflare Workers and D1. Write in Markdown, manage posts and comments in a browser, or connect an external writing tool through the REST API.
 
 [中文](README.md)
 
 ## Features
 
-- **Writing and reading:** Markdown posts, drafts, publishing, pinned posts, excerpts, view counts, and image previews.
+- **Writing and reading:** Markdown posts, drafts, publishing, pinned posts, excerpts, view counts, and image previews; upload images directly from the editor.
+- **Static pages and SEO:** Edge-cached front-end pages, full SEO metadata and structured data, sitemap, and automatic cache refresh after publishing.
 - **Discovery:** Two-level categories, tags, search, archives, RSS, sitemap, and SEO metadata.
 - **Comments:** Visitors can comment without an account; administrators can review, delete, and reply to comments.
 - **Optional notifications:** Configure an email provider to notify the administrator of new comments and, with a visitor's consent, send reply notifications. Comments and replies work without email configuration.
@@ -96,7 +107,7 @@ curl -X POST https://your-blog.workers.dev/api/posts \
 Requires Node.js 22:
 
 ```bash
-git clone https://github.com/qqzhoufan/fishblog.git
+git clone https://github.com/xitonghan/fishblog.git
 cd fishblog
 cp wrangler.toml.example wrangler.toml
 npm ci
