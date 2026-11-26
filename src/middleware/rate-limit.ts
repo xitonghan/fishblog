@@ -5,7 +5,7 @@ import { sha256 } from "./auth.ts";
 /** Fixed-window counters live in D1 so limits are shared across Worker isolates. */
 export async function checkRateLimit(
   c: Context<{ Bindings: Env }>,
-  action: "login" | "comment",
+  action: "login" | "comment" | "upload",
   maximum: number,
   windowSeconds: number,
 ): Promise<number> {
