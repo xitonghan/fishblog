@@ -1,0 +1,21 @@
+name = "fishblog"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+BLOG_TITLE = "析同的博客"
+BLOG_DESCRIPTION = "嵌入式硬件、电子技术随笔与生活记录"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fishblog-db"
+database_id = "40ce581f-4e6a-4b47-a376-bd4c1c57e658"
+
+[[kv_namespaces]]
+binding = "IMAGES"
+id = "234c5914b1af426bb96e468f9dcd4cad"
+
+[[kv_namespaces]]
+binding = "PAGES"
+id = "167dc43012814bb18125f42107b9ce51"
