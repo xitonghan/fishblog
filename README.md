@@ -1,12 +1,23 @@
 # FishBlog 🐟
 
+<div align="center">
+
+# 🌐 [blog.987998.xyz](https://blog.987998.xyz/)
+
+**析同的博客 · 嵌入式硬件、电子技术随笔与生活记录**
+
+[打开博客](https://blog.987998.xyz/) · [后台管理](https://blog.987998.xyz/admin)
+
+</div>
+
 一个运行在 Cloudflare Workers 和 D1 上的轻量博客。使用 Markdown 写作，通过浏览器管理文章、分类和评论，也可以用 REST API 接入其他写作工具。
 
 [English](README_EN.md)
 
 ## 功能
 
-- **写作与阅读**：Markdown 文章、草稿与发布、置顶、摘要、阅读量和图片预览。
+- **写作与阅读**：Markdown 文章、草稿与发布、置顶、摘要、阅读量和图片预览；后台可直接上传图片并插入文章。
+- **静态化与 SEO**：前台页面边缘缓存、完整 SEO 元数据与结构化数据、站点地图；发布内容后缓存自动刷新。
 - **组织与发现**：两级分类、标签、搜索、归档、RSS，以及站点地图和 SEO 元数据。
 - **评论互动**：游客无需注册即可留言；管理员可在后台查看、删除和回复评论。
 - **可选通知**：配置邮件服务后，可收到新留言通知；访客可以自愿留下邮箱，接收管理员回复通知。未配置时仍可正常使用评论和回复。
@@ -109,7 +120,7 @@ curl -X POST https://your-blog.workers.dev/api/posts \
 需要 Node.js 22。复制配置模板，并在本地配置管理员凭据：
 
 ```bash
-git clone https://github.com/qqzhoufan/fishblog.git
+git clone https://github.com/xitonghan/fishblog.git
 cd fishblog
 cp wrangler.toml.example wrangler.toml
 npm ci
