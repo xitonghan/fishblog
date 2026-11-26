@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../types.ts";
 import { sha256 } from "../middleware/auth.ts";
+import { invalidatePages } from "../middleware/page-cache.ts";
 import {
   getPublishedPosts, getAllPosts, getPostBySlug, getPostById,
   createPost, updatePost, deletePost,
@@ -43,6 +44,10 @@ api.use("/*", async (c, next) => {
   if (!key) return err("Invalid or missing API key", 401);
   c.set("apiKey" as never, key);
   await next();
+  // Any successful write changes public content — invalidate cached pages.
+  if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method) && c.res.status < 400) {
+    await invalidatePages(c.env);
+  }
 });
 
 api.get("/posts", async (c) => {
