@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { marked } from "marked";
 import { checkRateLimit } from "../middleware/rate-limit.ts";
+import { cachedPage, invalidatePages } from "../middleware/page-cache.ts";
 import type { Env } from "../types.ts";
 import { layout, escapeHtml, formatDate } from "../templates/layout.ts";
 import { sanitizeContent } from "../templates/sanitize.ts";
@@ -9,6 +10,11 @@ import { getPublishedPosts, getPostBySlug, getConfig, getCategoryTree, searchPos
 import type { Post } from "../types.ts";
 
 const blog = new Hono<{ Bindings: Env }>();
+
+// JSON-LD must never allow a literal "<" to break out of the script element.
+function structuredData(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
 
 function postListItem(p: Post): string {
   return `<li class="post-item">
@@ -22,7 +28,7 @@ function postListItem(p: Post): string {
   </li>`;
 }
 
-blog.get("/", async (c) => {
+blog.get("/", async (c) => cachedPage(c, async () => {
   const page = parseInt(c.req.query("page") || "1");
   const catId = c.req.query("cat") ? parseInt(c.req.query("cat")!) : undefined;
 
@@ -45,12 +51,53 @@ blog.get("/", async (c) => {
         </div>`
       : "";
 
-  const content = posts.length
-    ? `<ul class="post-list">${postItems}</ul>${pagination}`
-    : `<p style="text-align:center;color:var(--muted);padding:3rem 0">还没有文章 :)</p>`;
+  const origin = new URL(c.req.url).origin;
+  const blogTitle = config.blog_title || "FishBlog";
+  const siteDesc = config.blog_description || "";
+  const homepageLd = structuredData({
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": `${origin}/#website`,
+        url: `${origin}/`,
+        name: blogTitle,
+        description: siteDesc,
+        inLanguage: "zh-CN",
+        potentialAction: {
+          "@type": "SearchAction",
+          target: { "@type": "EntryPoint", urlTemplate: `${origin}/search?q={search_term_string}` },
+          "query-input": "required name=search_term_string",
+        },
+      },
+      {
+        "@type": "Blog",
+        "@id": `${origin}/#blog`,
+        url: `${origin}/`,
+        name: blogTitle,
+        description: siteDesc,
+        inLanguage: "zh-CN",
+      },
+    ],
+  });
 
-  return c.html(layout("首页", content, config, { categories, currentCategory: catId ? String(catId) : undefined }));
-});
+  const heading = `<h1 class="page-title">最新文章</h1>${siteDesc ? `<p class="page-lead">${escapeHtml(siteDesc)}</p>` : ""}`;
+  const content = heading + (posts.length
+    ? `<ul class="post-list">${postItems}</ul>${pagination}`
+    : `<p style="text-align:center;color:var(--muted);padding:3rem 0">还没有文章 :)</p>`);
+
+  return c.html(layout(blogTitle, content, config, {
+    categories,
+    currentCategory: catId ? String(catId) : undefined,
+    description: siteDesc,
+    canonical: catId
+      ? `${origin}/?cat=${catId}${page > 1 ? `&page=${page}` : ""}`
+      : `${origin}/${page > 1 ? `?page=${page}` : ""}`,
+    ogType: "website",
+    jsonLd: homepageLd,
+    origin,
+  }));
+}));
 
 blog.get("/search", async (c) => {
   const q = (c.req.query("q") || "").trim();
@@ -61,8 +108,16 @@ blog.get("/search", async (c) => {
     getCategoryTree(c.env.DB),
   ]);
 
+  const origin = new URL(c.req.url).origin;
+  const searchOptions = {
+    categories,
+    canonical: `${origin}/search`,
+    robots: "noindex, follow",
+    origin,
+  };
+
   if (!q) {
-    return c.html(layout("搜索", '<p style="text-align:center;color:var(--muted);padding:3rem 0">请输入搜索关键词</p>', config, { categories }));
+    return c.html(layout("搜索", '<p style="text-align:center;color:var(--muted);padding:3rem 0">请输入搜索关键词</p>', config, searchOptions));
   }
 
   const { posts, total } = await searchPosts(c.env.DB, q, page);
@@ -79,13 +134,13 @@ blog.get("/search", async (c) => {
       : "";
 
   const content = posts.length
-    ? `<h2 class="search-results-title">搜索 <span>"${escapeHtml(q)}"</span> 找到 ${total} 篇文章</h2><ul class="post-list">${postItems}</ul>${pagination}`
-    : `<h2 class="search-results-title">搜索 <span>"${escapeHtml(q)}"</span></h2><p style="text-align:center;color:var(--muted);padding:2rem 0">未找到相关文章</p>`;
+    ? `<h1 class="search-results-title">搜索 <span>"${escapeHtml(q)}"</span> 找到 ${total} 篇文章</h1><ul class="post-list">${postItems}</ul>${pagination}`
+    : `<h1 class="search-results-title">搜索 <span>"${escapeHtml(q)}"</span></h1><p style="text-align:center;color:var(--muted);padding:2rem 0">未找到相关文章</p>`;
 
-  return c.html(layout(`搜索: ${q}`, content, config, { categories }));
+  return c.html(layout(`搜索: ${q}`, content, config, searchOptions));
 });
 
-blog.get("/post/:slug", async (c) => {
+blog.get("/post/:slug", async (c) => cachedPage(c, async () => {
   const slug = c.req.param("slug");
   const [post, config, categories] = await Promise.all([
     getPostBySlug(c.env.DB, slug),
@@ -151,9 +206,31 @@ blog.get("/post/:slug", async (c) => {
   </article>
   ${commentsHtml}`;
 
+  const origin = new URL(c.req.url).origin;
   const canonical = new URL(`/post/${post.slug}`, c.req.url).href;
-  return c.html(layout(post.title, content, config, { categories, description: post.excerpt || config.blog_description, canonical }));
-});
+  const firstImage = html.match(/<img[^>]+src="([^"]+)"/i)?.[1];
+  const ogImage = firstImage ? new URL(firstImage, canonical).href : undefined;
+  const articleLd = structuredData({
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    "mainEntityOfPage": { "@type": "WebPage", "@id": canonical },
+    headline: post.title,
+    description: post.excerpt || "",
+    datePublished: post.created_at,
+    dateModified: post.updated_at,
+    publisher: { "@type": "Organization", name: config.blog_title || "FishBlog" },
+    ...(ogImage ? { image: [ogImage] } : {}),
+  });
+  return c.html(layout(post.title, content, config, {
+    categories,
+    description: post.excerpt || config.blog_description,
+    canonical,
+    ogType: "article",
+    ogImage,
+    jsonLd: articleLd,
+    origin,
+  }));
+}));
 
 blog.post("/post/:slug/comment", async (c) => {
   const retryAfter = await checkRateLimit(c, "comment", 20, 10 * 60);
@@ -187,10 +264,11 @@ blog.post("/post/:slug/comment", async (c) => {
     kind: "comment", eventId: String(commentId), commentId,
     postTitle: post.title, postSlug: post.slug, author, content,
   });
+  if (commentId) await invalidatePages(c.env);
   return c.redirect(`/post/${escapeHtml(slug)}#comments`);
 });
 
-blog.get("/tag/:name", async (c) => {
+blog.get("/tag/:name", async (c) => cachedPage(c, async () => {
   const tagName = c.req.param("name");
   const page = parseInt(c.req.query("page") || "1");
 
@@ -212,13 +290,20 @@ blog.get("/tag/:name", async (c) => {
       : "";
 
   const content = posts.length
-    ? `<h2 class="search-results-title">标签 <span>#${escapeHtml(tagName)}</span> 共 ${total} 篇</h2><ul class="post-list">${postItems}</ul>${pagination}`
-    : `<h2 class="search-results-title">标签 <span>#${escapeHtml(tagName)}</span></h2><p style="text-align:center;color:var(--muted);padding:2rem 0">暂无文章</p>`;
+    ? `<h1 class="search-results-title">标签 <span>#${escapeHtml(tagName)}</span> 共 ${total} 篇</h1><ul class="post-list">${postItems}</ul>${pagination}`
+    : `<h1 class="search-results-title">标签 <span>#${escapeHtml(tagName)}</span></h1><p style="text-align:center;color:var(--muted);padding:2rem 0">暂无文章</p>`;
 
-  return c.html(layout(`#${tagName}`, content, config, { categories }));
-});
+  const origin = new URL(c.req.url).origin;
+  const tagDesc = `标签 #${tagName} 下的全部文章`;
+  return c.html(layout(`#${tagName}`, content, config, {
+    categories,
+    description: tagDesc,
+    canonical: `${origin}/tag/${encodeURIComponent(tagName)}`,
+    origin,
+  }));
+}));
 
-blog.get("/archive", async (c) => {
+blog.get("/archive", async (c) => cachedPage(c, async () => {
   const [{ posts }, config, categories] = await Promise.all([
     getPublishedPosts(c.env.DB, 1, 9999),
     getConfig(c.env.DB),
@@ -250,9 +335,15 @@ blog.get("/archive", async (c) => {
     )
     .join("");
 
-  const content = archiveHtml || '<p style="text-align:center;color:var(--muted);padding:3rem 0">暂无归档</p>';
-  return c.html(layout("归档", content, config, { categories }));
-});
+  const content = `<h1 class="page-title">归档</h1>${archiveHtml || '<p style="text-align:center;color:var(--muted);padding:3rem 0">暂无归档</p>'}`;
+  const origin = new URL(c.req.url).origin;
+  return c.html(layout("归档", content, config, {
+    categories,
+    canonical: `${origin}/archive`,
+    description: `按年份浏览 ${config.blog_title || "FishBlog"} 的全部文章`,
+    origin,
+  }));
+}));
 
 blog.get("/feed.xml", async (c) => {
   const [{ posts }, config] = await Promise.all([
@@ -286,36 +377,58 @@ blog.get("/feed.xml", async (c) => {
   </channel>
 </rss>`;
 
-  return c.text(rss, 200, { "Content-Type": "application/xml" });
+  return c.text(rss, 200, { "Content-Type": "application/xml", "Cache-Control": "public, s-maxage=600" });
 });
 
 blog.get("/sitemap.xml", async (c) => {
-  const [{ posts }, config] = await Promise.all([
+  const [{ posts }, tags] = await Promise.all([
     getPublishedPosts(c.env.DB, 1, 9999),
-    getConfig(c.env.DB),
+    getAllTags(c.env.DB),
   ]);
 
-  const url = new URL(c.req.url);
-  const baseUrl = `${url.protocol}//${url.host}`;
-  const blogTitle = config.blog_title || "FishBlog";
+  const origin = new URL(c.req.url).origin;
+  const today = new Date().toISOString().slice(0, 10);
+  const latestPost = posts.reduce((latest, p) => (p.updated_at > latest ? p.updated_at : latest), "");
 
   const items = posts
     .map(
       (p) => `<url>
-      <loc>${baseUrl}/post/${escapeHtml(p.slug)}</loc>
+      <loc>${origin}/post/${escapeHtml(p.slug)}</loc>
       <lastmod>${p.updated_at.slice(0, 10)}</lastmod>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>`
+    )
+    .join("\n");
+
+  const tagItems = tags
+    .map(
+      (t) => `<url>
+      <loc>${origin}/tag/${encodeURIComponent(t.name)}</loc>
+      <priority>0.4</priority>
     </url>`
     )
     .join("\n");
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>${baseUrl}/</loc></url>
-  <url><loc>${baseUrl}/archive</loc></url>
+  <url>
+    <loc>${origin}/</loc>
+    <lastmod>${(latestPost || today).slice(0, 10)}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>${origin}/archive</loc>
+    <lastmod>${(latestPost || today).slice(0, 10)}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
   ${items}
+  ${tagItems}
 </urlset>`;
 
-  return c.text(xml, 200, { "Content-Type": "application/xml" });
+  return c.text(xml, 200, { "Content-Type": "application/xml", "Cache-Control": "public, s-maxage=600" });
 });
 
 blog.get("/robots.txt", (c) => {
@@ -324,7 +437,32 @@ blog.get("/robots.txt", (c) => {
   return c.text(`User-agent: *
 Allow: /
 Sitemap: ${baseUrl}/sitemap.xml
-`);
+`, 200, { "Cache-Control": "public, s-maxage=3600" });
+});
+
+const IMAGE_MIME: Record<string, string> = {
+  jpg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+  avif: "image/avif",
+};
+
+blog.get("/images/:key", async (c) => {
+  const key = c.req.param("key");
+  const ext = key.split(".").pop()?.toLowerCase() || "";
+  const mime = IMAGE_MIME[ext];
+  if (!mime || !/^[a-zA-Z0-9._-]+$/.test(key)) return c.notFound();
+  const data = await c.env.IMAGES.get(key);
+  if (!data) return c.notFound();
+  const bytes = Uint8Array.from(atob(data), (ch) => ch.charCodeAt(0));
+  return new Response(bytes, {
+    headers: {
+      "Content-Type": mime,
+      "Cache-Control": "public, max-age=31536000, immutable",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 });
 
 blog.get("/favicon.ico", async (c) => {
