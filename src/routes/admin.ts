@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "../types.ts";
 import { sha256, adminAuth, createAdminSession, revokeAdminSession } from "../middleware/auth.ts";
 import { checkRateLimit } from "../middleware/rate-limit.ts";
+import { invalidatePages } from "../middleware/page-cache.ts";
 import { dispatchNotification, dispatchPendingNotifications } from "../services/notification-dispatch.ts";
 import { adminNotificationConfigured, getNotificationStats, notificationConfigured, retryFailedNotifications } from "../services/notifications.ts";
 import {
@@ -60,6 +61,42 @@ admin.get("/logout", async (c) => {
 
 admin.use("/*", adminAuth);
 
+// ── Image uploads (stored in KV as base64, served by /images/:key) ──
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+admin.post("/upload", async (c) => {
+  const retryAfter = await checkRateLimit(c, "upload", 30, 10 * 60);
+  if (retryAfter) return c.json({ error: "上传过于频繁，请稍后再试" }, 429);
+
+  const body = await c.req.parseBody();
+  const file = body.file;
+  if (!(file instanceof File)) return c.json({ error: "请选择图片文件" }, 400);
+
+  const extByType: Record<string, string> = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "image/avif": "avif",
+  };
+  const ext = extByType[file.type];
+  if (!ext) return c.json({ error: "仅支持 JPG / PNG / WebP / GIF / AVIF" }, 400);
+  if (file.size === 0) return c.json({ error: "图片内容为空" }, 400);
+  if (file.size > 5 * 1024 * 1024) return c.json({ error: "单张图片不能超过 5MB" }, 413);
+
+  const key = `${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+  await c.env.IMAGES.put(key, toBase64(new Uint8Array(await file.arrayBuffer())));
+  return c.json({ url: `/images/${key}` });
+});
+
 // ── Posts ──
 
 admin.get("/", async (c) => {
@@ -85,6 +122,7 @@ admin.post("/new", async (c) => {
     published: parseInt(body.published as string) || 0, category_id: catId,
     is_pinned: body.is_pinned ? 1 : 0,
   }, parseTags(body.tags as string));
+  await invalidatePages(c.env);
   return c.redirect("/admin");
 });
 
@@ -107,11 +145,13 @@ admin.post("/edit/:id", async (c) => {
     published: parseInt(body.published as string) || 0, category_id: catId,
     is_pinned: body.is_pinned ? 1 : 0,
   }, parseTags(body.tags as string));
+  await invalidatePages(c.env);
   return c.redirect("/admin");
 });
 
 admin.post("/delete/:id", async (c) => {
   await deletePost(c.env.DB, parseInt(c.req.param("id")));
+  await invalidatePages(c.env);
   return c.redirect("/admin");
 });
 
@@ -144,6 +184,7 @@ admin.post("/comments/notifications/retry", async (c) => {
 
 admin.post("/comments/delete/:id", async (c) => {
   await deleteComment(c.env.DB, parseInt(c.req.param("id")));
+  await invalidatePages(c.env);
   return c.redirect("/admin/comments");
 });
 
@@ -161,6 +202,7 @@ admin.post("/comments/reply/:id", async (c) => {
     kind: "reply", eventId: String(replyId), commentId: id, recipient: comment.email,
     postTitle: comment.post_title, postSlug: comment.post_slug, author: comment.author, content,
   });
+  await invalidatePages(c.env);
   return c.redirect("/admin/comments");
 });
 
@@ -193,6 +235,7 @@ admin.post("/categories/new", async (c) => {
     parent_id: body.parent_id ? parseInt(body.parent_id as string) : null,
     sort_order: parseInt(body.sort_order as string) || 0,
   });
+  await invalidatePages(c.env);
   return c.redirect("/admin/categories");
 });
 
@@ -214,11 +257,13 @@ admin.post("/categories/edit/:id", async (c) => {
     parent_id: body.parent_id ? parseInt(body.parent_id as string) : null,
     sort_order: parseInt(body.sort_order as string) || 0,
   });
+  await invalidatePages(c.env);
   return c.redirect("/admin/categories");
 });
 
 admin.post("/categories/delete/:id", async (c) => {
   await deleteCategory(c.env.DB, parseInt(c.req.param("id")));
+  await invalidatePages(c.env);
   return c.redirect("/admin/categories");
 });
 
@@ -285,6 +330,7 @@ admin.post("/settings", async (c) => {
   }
 
   await setConfigValues(c.env.DB, values);
+  await invalidatePages(c.env);
   return c.redirect("/admin/settings?saved=1");
 });
 
