@@ -9,6 +9,7 @@ export function adminLayout(title: string, content: string): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
   <title>${escapeHtml(title)} - FishBlog Admin</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -19,7 +20,7 @@ export function adminLayout(title: string, content: string): string {
       --success: #22c55e; --danger: #ef4444;
       --radius: 8px;
     }
-    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--fg); min-height: 100vh; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: var(--bg); color: var(--fg); min-height: 100vh; }
     a { color: var(--accent); text-decoration: none; }
     a:hover { color: var(--accent-hover); }
 
@@ -64,7 +65,7 @@ export function adminLayout(title: string, content: string): string {
       color: var(--fg); font-size: .9rem; font-family: inherit;
     }
     .form-group input:focus, .form-group textarea:focus, .form-group select:focus { outline: none; border-color: var(--accent); }
-    .form-group textarea { min-height: 400px; font-family: 'JetBrains Mono', monospace; line-height: 1.6; resize: vertical; }
+    .form-group textarea { min-height: 400px; font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; line-height: 1.6; resize: vertical; }
 
     .form-row { display: flex; gap: 1rem; }
     .form-row .form-group { flex: 1; }
@@ -93,7 +94,6 @@ export function adminLayout(title: string, content: string): string {
     .notification-status { margin: 0 0 1.25rem; padding: 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); line-height: 1.6; }
     .notification-status p { margin: .35rem 0; color: var(--muted); font-size: .875rem; }
   </style>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 </head>
 <body>
   <div class="admin-header">
@@ -119,11 +119,12 @@ export function loginPage(error?: string): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
   <title>登录 - FishBlog Admin</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root { --bg: #0f172a; --fg: #e2e8f0; --muted: #94a3b8; --surface: #1e293b; --border: #334155; --accent: #f97316; --radius: 8px; }
-    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--fg); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: var(--bg); color: var(--fg); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
     .login-box { width: 100%; max-width: 400px; background: var(--surface); padding: 2.5rem; border-radius: 12px; border: 1px solid var(--border); margin: 1rem; }
     .login-box h2 { text-align: center; margin-bottom: 1.5rem; font-size: 1.5rem; }
     .login-box h2 span { color: var(--accent); }
@@ -135,7 +136,6 @@ export function loginPage(error?: string): string {
     .btn:hover { background: #ea580c; }
     .error-msg { background: #450a0a; color: #ef4444; padding: .6rem 1rem; border-radius: var(--radius); margin-bottom: 1rem; font-size: .85rem; text-align: center; }
   </style>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
   <div class="login-box">
@@ -214,7 +214,14 @@ export function postEditorPage(post?: Post, categories: Category[] = [], tags: s
         <label>标签（用逗号分隔，可留空）</label>
         <input type="text" name="tags" value="${escapeHtml(tags.join(", "))}" placeholder="例如：技术, Cloudflare, 教程">
       </div>
-      <div class="form-group"><label>正文（Markdown）</label><textarea name="content">${escapeHtml(post?.content || "")}</textarea></div>
+      <div class="form-group">
+        <label>正文（Markdown）</label>
+        <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem">
+          <label class="btn btn-sm" style="cursor:pointer">插入图片<input type="file" id="image-file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" style="display:none"></label>
+          <span id="image-status" style="font-size:.8rem;color:var(--muted)">JPG / PNG / WebP / GIF / AVIF，单张 ≤ 5MB</span>
+        </div>
+        <textarea id="post-content" name="content">${escapeHtml(post?.content || "")}</textarea>
+      </div>
       <div class="form-row" style="align-items:end">
         <div class="form-group"><label>状态</label>
           <select name="published">
@@ -229,7 +236,37 @@ export function postEditorPage(post?: Post, categories: Category[] = [], tags: s
         </div>
         <div class="form-group"><div class="actions"><button type="submit" class="btn btn-primary">保存</button><a href="/admin" class="btn">取消</a></div></div>
       </div>
-    </form>`);
+    </form>
+    <script>
+    (function () {
+      var input = document.getElementById('image-file');
+      var status = document.getElementById('image-status');
+      var area = document.getElementById('post-content');
+      if (!input || !status || !area) return;
+      input.addEventListener('change', async function () {
+        var file = input.files && input.files[0];
+        if (!file) return;
+        status.textContent = '正在上传…';
+        var form = new FormData();
+        form.append('file', file);
+        try {
+          var response = await fetch('/admin/upload', { method: 'POST', body: form });
+          var data = await response.json();
+          if (!response.ok || !data.url) throw new Error(data.error || '上传失败');
+          var alt = file.name.replace(/[\[\]]/g, '');
+          var markdown = '![' + alt + '](' + data.url + ')';
+          var start = area.selectionStart, end = area.selectionEnd;
+          area.value = area.value.slice(0, start) + markdown + area.value.slice(end);
+          area.focus();
+          area.selectionStart = area.selectionEnd = start + markdown.length;
+          status.textContent = '图片已插入正文';
+        } catch (err) {
+          status.textContent = '上传失败：' + (err && err.message ? err.message : '未知错误');
+        }
+        input.value = '';
+      });
+    })();
+    </script>`);
 }
 
 // ── Categories ──
